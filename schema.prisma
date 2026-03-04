@@ -1,0 +1,144 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") // Recommended for Supabase (connection pooling vs direct)
+}
+
+enum Role {
+  admin
+  student
+}
+
+model User {
+  id        String   @id @default(uuid())
+  supabaseId String  @unique
+  email     String   @unique
+  fullName  String?
+  role      Role     @default(student)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  enrollments Enrollment[]
+  orders      Order[]
+
+  @@map("users")
+}
+
+model Course {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  title       String
+  description String
+  price       Int      // store price in IQD (integer) to avoid floating issues
+  currency    String   @default("IQD")
+  imagePath   String?
+  isPublished Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  modules Module[]
+  enrollments Enrollment[]
+  orders Order[]
+
+  @@index([isPublished])
+  @@map("courses")
+}
+
+model Module {
+  id        String   @id @default(uuid())
+  courseId  String
+  title     String
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons Lesson[]
+
+  @@index([courseId, order])
+  @@map("modules")
+}
+
+model Lesson {
+  id        String   @id @default(uuid())
+  moduleId  String
+  title     String
+  order     Int      @default(0)
+  videoUrl  String?  // If using a streaming provider later, store the playback id here
+  notes     String?  // Markdown notes
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@index([moduleId, order])
+  @@map("lessons")
+}
+
+model Enrollment {
+  id        String   @id @default(uuid())
+  userId    String
+  courseId  String
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+  @@index([courseId])
+  @@map("enrollments")
+}
+
+enum OrderStatus {
+  pending
+  paid
+  failed
+  refunded
+}
+
+model Order {
+  id        String      @id @default(uuid())
+  userId    String
+  courseId  String
+  amount    Int
+  currency  String      @default("IQD")
+  status    OrderStatus @default(pending)
+  provider  String      // "zaincash" | "qicard" | "stripe"
+  providerRef String?   // external reference/id
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  @@index([userId, status])
+  @@index([courseId])
+  @@map("orders")
+}
+
+enum PaymentStatus {
+  pending
+  succeeded
+  failed
+}
+
+model Payment {
+  id          String        @id @default(uuid())
+  orderId     String
+  provider    String
+  status      PaymentStatus @default(pending)
+  amount      Int
+  currency    String        @default("IQD")
+  raw         Json?
+  createdAt   DateTime      @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("payments")
+}
