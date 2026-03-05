@@ -13,21 +13,17 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const token = url.searchParams.get("token");
 
-  if (!token) {
-    return NextResponse.json({ ok: false, error: "token مفقود" }, { status: 400 });
-  }
+  if (!token) return NextResponse.json({ ok: false, error: "token مفقود" }, { status: 400 });
 
   const apiKey = process.env.ZAINCASH_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ ok: false, error: "ZAINCASH_API_KEY مفقود" }, { status: 500 });
-  }
+  if (!apiKey) return NextResponse.json({ ok: false, error: "ZAINCASH_API_KEY مفقود" }, { status: 500 });
 
   try {
     const { payload } = await jwtVerify(token, new TextEncoder().encode(apiKey), {
       algorithms: ["HS256"],
     });
 
-    // Make payload safe for Prisma Json field
+    // ✅ Make payload safe for Prisma Json field
     const safePayload = JSON.parse(JSON.stringify(payload));
 
     // Payload typically includes orderId + transactionId + status (per ZainCash docs)
@@ -36,19 +32,18 @@ export async function GET(req: Request) {
     const transactionId = String((safePayload as any).transactionId ?? (safePayload as any).id ?? "");
 
     if (!orderId) {
-      return NextResponse.json(
-        { ok: false, error: "orderId غير موجود داخل التوكن" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "orderId غير موجود داخل التوكن" }, { status: 400 });
     }
 
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: { course: true, user: true },
     });
+    if (!order) return NextResponse.json({ ok: false, error: "الطلب غير موجود" }, { status: 404 });
 
-    if (!order) {
-      return NextResponse.json({ ok: false, error: "الطلب غير موجود" }, { status: 404 });
+    // Idempotency: if already final, ignore
+    if (order.status === "paid" || order.status === "failed" || order.status === "refunded") {
+      return NextResponse.json({ ok: true, data: { orderId, status, payload: safePayload } });
     }
 
     // Map statuses: SUCCESS / FAILED / PENDING ...
