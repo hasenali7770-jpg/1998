@@ -13,26 +13,43 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const token = url.searchParams.get("token");
 
-  if (!token) return NextResponse.json({ ok: false, error: "token مفقود" }, { status: 400 });
+  if (!token) {
+    return NextResponse.json({ ok: false, error: "token مفقود" }, { status: 400 });
+  }
 
   const apiKey = process.env.ZAINCASH_API_KEY;
-  if (!apiKey) return NextResponse.json({ ok: false, error: "ZAINCASH_API_KEY مفقود" }, { status: 500 });
+  if (!apiKey) {
+    return NextResponse.json({ ok: false, error: "ZAINCASH_API_KEY مفقود" }, { status: 500 });
+  }
 
   try {
     const { payload } = await jwtVerify(token, new TextEncoder().encode(apiKey), {
       algorithms: ["HS256"],
     });
 
+    // Make payload safe for Prisma Json field
+    const safePayload = JSON.parse(JSON.stringify(payload));
+
     // Payload typically includes orderId + transactionId + status (per ZainCash docs)
-    const orderId = String((payload as any).orderId ?? "");
-    const status = String((payload as any).status ?? "");
+    const orderId = String((safePayload as any).orderId ?? "");
+    const status = String((safePayload as any).status ?? "");
+    const transactionId = String((safePayload as any).transactionId ?? (safePayload as any).id ?? "");
 
     if (!orderId) {
-      return NextResponse.json({ ok: false, error: "orderId غير موجود داخل التوكن" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "orderId غير موجود داخل التوكن" },
+        { status: 400 }
+      );
     }
 
-    const order = await prisma.order.findUnique({ where: { id: orderId }, include: { course: true, user: true } });
-    if (!order) return NextResponse.json({ ok: false, error: "الطلب غير موجود" }, { status: 404 });
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { course: true, user: true },
+    });
+
+    if (!order) {
+      return NextResponse.json({ ok: false, error: "الطلب غير موجود" }, { status: 404 });
+    }
 
     // Map statuses: SUCCESS / FAILED / PENDING ...
     if (status === "SUCCESS") {
@@ -45,7 +62,7 @@ export async function GET(req: Request) {
             status: "succeeded",
             amount: order.amount,
             currency: order.currency,
-            raw: { redirectTokenPayload: payload },
+            raw: { redirectTokenPayload: safePayload, transactionId },
           },
         }),
         prisma.enrollment.upsert({
@@ -64,13 +81,13 @@ export async function GET(req: Request) {
             status: "failed",
             amount: order.amount,
             currency: order.currency,
-            raw: { redirectTokenPayload: payload },
+            raw: { redirectTokenPayload: safePayload, transactionId },
           },
         }),
       ]);
     }
 
-    return NextResponse.json({ ok: true, data: { orderId, status, payload } });
+    return NextResponse.json({ ok: true, data: { orderId, status, payload: safePayload } });
   } catch (e) {
     console.error("ZainCash callback verify error:", e);
     return NextResponse.json({ ok: false, error: "فشل التحقق من التوكن" }, { status: 400 });
