@@ -21,9 +21,13 @@ export async function POST(req: Request) {
       algorithms: ["HS256"],
     });
 
-    const orderId = String((payload as any).orderId ?? "");
-    const status = String((payload as any).status ?? "");
-    const eventId = String((payload as any).eventId ?? "");
+    // Make payload safe for Prisma Json field
+    const safePayload = JSON.parse(JSON.stringify(payload));
+
+    const orderId = String((safePayload as any).orderId ?? "");
+    const status = String((safePayload as any).status ?? "");
+    const eventId = String((safePayload as any).eventId ?? "");
+    const transactionId = String((safePayload as any).transactionId ?? (safePayload as any).id ?? "");
 
     if (!orderId) return NextResponse.json({ ok: true }); // acknowledge but can't process
 
@@ -45,7 +49,7 @@ export async function POST(req: Request) {
             status: "succeeded",
             amount: order.amount,
             currency: order.currency,
-            raw: { eventId, webhookPayload: payload },
+            raw: { eventId, transactionId, webhookPayload: safePayload },
           },
         }),
         prisma.enrollment.upsert({
@@ -64,7 +68,7 @@ export async function POST(req: Request) {
             status: "failed",
             amount: order.amount,
             currency: order.currency,
-            raw: { eventId, webhookPayload: payload },
+            raw: { eventId, transactionId, webhookPayload: safePayload },
           },
         }),
       ]);
